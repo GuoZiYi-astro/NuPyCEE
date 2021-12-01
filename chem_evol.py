@@ -69,6 +69,8 @@ from pylab import polyfit
 from scipy.integrate import quad
 from scipy.integrate import dblquad
 
+import importlib
+
 # Define where is the working directory
 nupy_path = os.path.dirname(os.path.realpath(__file__))
 
@@ -121,11 +123,15 @@ class chem_evol(object):
         Default value : [1,30]
 
     imf_type : string
-        Choices : 'salpeter', 'chabrier', 'kroupa', 'alphaimf', 'lognormal'
+        Choices : 'salpeter', 'chabrier', 'kroupa', 'alphaimf', 'lognormal', 'input'
         'alphaimf' creates a custom IMF with a single power-law covering imf_bdys.
         'lognormal' creates an IMF of the form Exp[1/(2 1^2) Log[x/charMass]^2
 
         Default value : 'kroupa'
+
+    imf_file : string
+        Only valid when use the 'input' imf_type, it should be put in the direction
+        'imf_list'. The function must name as custom_imf. 
 
     alphaimf : float
         Aplha index of the custom IMF, dN/dM = Constant * M^-alphaimf
@@ -447,7 +453,7 @@ class chem_evol(object):
     ##############################################
     ##               Constructor                ##
     ##############################################
-    def __init__(self, imf_type='kroupa', alphaimf=2.35, imf_bdys=[0.1,100],\
+    def __init__(self, imf_type='kroupa', imf_file='', alphaimf=2.35, imf_bdys=[0.1,100],\
              sn1a_rate='power_law', iniZ=0.02, dt=1e6, special_timesteps=30,\
              nsmerger_bdys=[8, 100], tend=13e9, mgal=1.6e11, transitionmass=8, iolevel=0,\
              ini_alpha=True, is_sygma=False,\
@@ -575,6 +581,7 @@ class chem_evol(object):
         self.hardsetZ = hardsetZ
         self.starbursts = starbursts
         self.imf_type = imf_type
+        self.imf_file = imf_file
         self.alphaimf = alphaimf
         self.sn1a_on = sn1a_on
         self.sn1a_energy=sn1a_energy
@@ -6993,7 +7000,13 @@ class chem_evol(object):
         if self.imf_type=='input':
 
             # Load the file
-            ci = load_source('custom_imf', os.path.join(nupy_path, 'imf_input.py'))
+            if self.imf_file == None:
+                input_imf = importlib.import_module('NuPyCEE.imf_input')
+            else:
+                input_imf = importlib.import_module('NuPyCEE.imf_list.'+self.imf_file)
+            # ci = load_source('custom_imf', os.path.join(nupy_path, 'imf_input.py'))
+            # ci=in_imf.custom_imf
+            ci = input_imf.custom_imf
             self.ci = ci
             # Choose the right option
             if inte == 0:
@@ -7224,7 +7237,8 @@ class chem_evol(object):
         '''
 
         # Return the number of stars
-        return self.ci.custom_imf(mass)
+        # return self.ci.custom_imf(mass)
+        return self.ci(mass)
 
 
     ##############################################
@@ -7245,7 +7259,8 @@ class chem_evol(object):
         '''
 
         # Return the total mass of stars
-        return mass * self.ci.custom_imf(mass)
+        # return mass * self.ci.custom_imf(mass)
+        return mass * self.ci(mass)
 
 
     ##############################################
