@@ -257,7 +257,7 @@ class omega( chem_evol ):
                  m_DM_0=1.0e11, mass_loading=1.0, t_star=-1.0, sfh_file='none', \
                  in_out_ratio=1.0, stellar_mass_0=-1.0, \
                  z_dependent=True, exp_ml=2.0,nsmerger_bdys=[8, 100], \
-                 imf_type='kroupa', alphaimf=2.35, imf_bdys=[0.1,100], \
+                 imf_type='kroupa', imf_file=None, alphaimf=2.35, imf_bdys=[0.1,100], \
                  sn1a_rate='power_law', iniZ=0.0, dt=1e6, special_timesteps=30, \
                  tend=13e9, mgal=1.0e10, transitionmass=8.0, iolevel=0, \
                  ini_alpha=True, nb_nsm_per_m=-1.0, t_nsm_coal=-1,\
@@ -354,7 +354,7 @@ class omega( chem_evol ):
         self.start_time = start_time
 
         # Call the init function of the class inherited by SYGMA
-        chem_evol.__init__(self, imf_type=imf_type, alphaimf=alphaimf, \
+        chem_evol.__init__(self, imf_type=imf_type, imf_file=imf_file, alphaimf=alphaimf, \
                  imf_bdys=imf_bdys, sn1a_rate=sn1a_rate, iniZ=iniZ, dt=dt, \
                  special_timesteps=special_timesteps, tend=tend, mgal=mgal, \
                  transitionmass=transitionmass, iolevel=iolevel, \
@@ -612,7 +612,7 @@ class omega( chem_evol ):
             s_inst = []
             self.mass_frac_SSP = 0.0
             for i_Z_SSP in range(0,len(Z)):
-                s_inst = sygma.sygma(imf_type=imf_type, alphaimf=alphaimf,\
+                s_inst = sygma.sygma(imf_type=imf_type, imf_file=imf_file, alphaimf=alphaimf,\
                  imf_bdys=imf_bdys, sn1a_rate=sn1a_rate, iniZ=Z[i_Z_SSP], dt=dt, \
                  special_timesteps=special_timesteps, tend=tend, mgal=1.0, \
                  transitionmass=transitionmass, iolevel=iolevel, \
@@ -1597,7 +1597,7 @@ class omega( chem_evol ):
 
               # Run a SYGMA simulation (1 Msun SSP)
               sygma_inst = sygma.sygma(pre_calculate_SSPs=False, \
-                 imf_type=self.imf_type, alphaimf=self.alphaimf, \
+                 imf_type=self.imf_type, imf_file=self.imf_file, alphaimf=self.alphaimf, \
                  imf_bdys=self.history.imf_bdys, sn1a_rate=self.history.sn1a_rate, \
                  iniZ=self.Z_table_SSP[i_ras], dt=self.history.dt, \
                  special_timesteps=self.special_timesteps, \

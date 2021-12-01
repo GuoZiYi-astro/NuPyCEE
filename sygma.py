@@ -124,7 +124,7 @@ class sygma( chem_evol ):
     #                Constructor                 #
     ##############################################
     def __init__(self, sfr='input', \
-                 imf_type='kroupa', alphaimf=2.35, imf_bdys=[0.1,100], \
+                 imf_type='kroupa', imf_file=None, alphaimf=2.35, imf_bdys=[0.1,100], \
                  sn1a_rate='power_law', iniZ=0.02, dt=1e6, special_timesteps=30, \
                  nsmerger_bdys=[8, 100], tend=13e9, mgal=1e4, transitionmass=8.0, iolevel=0, \
                  ini_alpha=True, table='yield_tables/agb_and_massive_stars_nugrid_MESAonly_fryer12delay.txt', \
@@ -171,7 +171,7 @@ class sygma( chem_evol ):
                  yield_modifier=np.array([])):
 
         # Call the init function of the class inherited by SYGMA
-        chem_evol.__init__(self, is_sygma=True, imf_type=imf_type, alphaimf=alphaimf, \
+        chem_evol.__init__(self, is_sygma=True, imf_type=imf_type, imf_file=imf_file, alphaimf=alphaimf, \
                  imf_bdys=imf_bdys, sn1a_rate=sn1a_rate, iniZ=iniZ, dt=dt, \
                  special_timesteps=special_timesteps, tend=tend, mgal=mgal, \
                  nsmerger_bdys=nsmerger_bdys, transitionmass=transitionmass, iolevel=iolevel, \
