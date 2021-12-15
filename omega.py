@@ -3944,6 +3944,146 @@ class omega( chem_evol ):
             self.__fig_standard(ax=ax,fontsize=fontsize,labelsize=labelsize,rspace=rspace, bspace=bspace,legend_fontsize=legend_fontsize)
             #self.save_data(header=[xaxis,yaxis],data=[x,y])
 
+    def plot_ziyi_totmasses(self,fig=7,mass='gas',source='all',label='',shape='',marker='',color='',markevery=20,log=True,fsize=[10,4.5],fontsize=14,rspace=0.6,bspace=0.15,labelsize=15,legend_fontsize=14,return_x_y=False):
+        '''
+        Plot the total mass of gas or stars
+        This is the edition changed by ziyi, the origin is the plot_totmasses()
+        I'm trying to calculate the mass in the gas or stars  more accurate
+        
+        Parameters
+        -----------
+        mass : string
+            'gas' for ISM gas mass in the galaxy
+            'stars' for mass locked away in stars (totalgas - ISM gas)
+
+        source : string
+            the source of the yields
+            for mass='stars' this option is not valid
+
+        log : boolean
+            if true plot logarithmic y axis
+
+        label : string
+            figure label
+
+        marker : string
+            figure marker
+
+        shape : string
+            line style
+
+        color : string 
+            color of line
+
+        fig : string, float
+            to name the plot figure
+
+        Examples
+        ----------
+        >>> s.plot_ziyi_totmasses()
+
+        '''
+
+        import matplotlib
+        import matplotlib.pyplot as plt
+
+        if not return_x_y:
+            plt.figure(fig, figsize=(fsize[0],fsize[1]))
+
+        #Assume isotope input
+
+        xaxis='age'
+        if source =='all':
+            if len(label)==0:
+                        label='All'
+        if source == 'agb':
+            if len(label)==0:
+                        label='AGB'
+        if source =='massive':
+            if len(label)==0:
+                        label='Massive'
+        if source =='sn1a':
+            if len(label)==0:
+                label='SNIa'
+
+        shape,marker,color=self.__msc(source,shape,marker,color)
+
+        if 'age' == xaxis:
+            x_all=self.history.age#[1:]
+            if not return_x_y:
+                plt.xscale('log')
+                plt.xlabel('log-scaled '+xaxis+' [yrs]')
+            #self.x=x
+
+        # The self.history.gas_mass only consider the star formation,
+        # that is not very physical
+        # so here i calculate the actual gas_mass
+        gas_mass = []
+        if self.open_box:
+            for i_gm in range(0,len(x_all[:-1])):
+                gas_mass.append(self.history.gas_mass[i_gm] + \
+                        self.m_inflow_t[i_gm] + \
+                        np.sum(self.history.ism_elem_yield[i_gm]) - \
+                        self.m_outflow_t[i_gm])
+        else:
+            print('please use plot_totmasses')
+
+        #to test the different contributions
+        
+        if source =='agb':
+            yields_evol=self.history.ism_elem_yield_agb
+        elif source == 'sn1a':
+            yields_evol=self.history.ism_elem_yield_1a
+        elif source == 'massive':
+            yields_evol=self.history.ism_elem_yield_massive
+        if not source == 'all':
+            gas_ej=[]
+            for k in range(len(yields_evol)):
+                gas_ej.append(np.sum(yields_evol[k]))
+
+        star_m=[]
+        x=[]
+        #To prevent 0 +log scale
+        if 'age' == xaxis:
+                x_all=x_all[1:]
+                gas_mass=gas_mass[1:]
+        for k in range(0,len(gas_mass)):
+            if gas_mass[k]==0:
+                continue
+            x.append(x_all[k])
+            star_m.append(self.mgal+self.m_inflow_t[k]-self.m_outflow_t[k]-gas_mass[k])
+        print(self.mgal)
+        if mass == 'gas':
+            if source == 'all':
+                y=gas_mass
+            else:
+                gas_ej = gas_ej[1:]
+                y=gas_ej
+        if mass == 'stars':
+            y=star_m
+        if not return_x_y:
+            plt.plot(x,y,linestyle=shape,marker=marker,markevery=markevery,color=color,label=label)
+            if len(label)>0:
+                plt.legend()
+            if mass=='gas':
+                plt.ylabel('ISM gas mass [Msun]')
+            else:
+                plt.ylabel('mass locked in stars [Msun]')
+
+            if mass=='gas':
+                plt.ylabel('ISM gas mass [Msun]')
+            else:
+                plt.ylabel('Mass locked in stars [Msun]')
+
+            if log==True:
+                plt.yscale('log')
+            ax=plt.gca()
+            self.__fig_standard(ax=ax,fontsize=fontsize,labelsize=labelsize,rspace=rspace, bspace=bspace,legend_fontsize=legend_fontsize)
+            plt.xlim(self.history.dt,self.history.tend)
+            #self.save_data(header=['age','mass'],data=[x,y])
+        else:
+            return x,y
+
 
 
     def plot_totmasses(self,fig=4,mass='gas',source='all',norm='no',label='',shape='',marker='',color='',markevery=20,log=True,fsize=[10,4.5],fontsize=14,rspace=0.6,bspace=0.15,labelsize=15,legend_fontsize=14,return_x_y=False):
