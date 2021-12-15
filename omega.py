@@ -1301,6 +1301,17 @@ class omega( chem_evol ):
           path_sfh_in : Path of the input SFH file.
 
         '''
+        
+        '''
+        I change the way to read star formation history.
+        I split the loop to three loops:
+        In first loop, I calculate the left sfr for every timestep.
+        In second loop, I calculate the right sfr for every timestep.
+        In third loop, I calculate the sfr for the center of the timestep and 
+        cumulate the stellar mass.
+        2021.12.01
+        By Zi-Yi Guo
+        '''
 
         # Variable to keep track of the OMEGA timestep
         nb_dt_csi = self.nb_timesteps + 1
@@ -1310,6 +1321,8 @@ class omega( chem_evol ):
 
         # Variable to keep track of the total stellar mass from the input SFH
         m_stel_sfr_in = 0.0
+        left_sfr = np.zeros(self.nb_timesteps)
+        right_sfr = np.zeros(self.nb_timesteps)
 
         # Open the file containing the SFR vs time
         with open(os.path.join(nupy_path, path_sfh_in), 'r') as sfr_file:
@@ -1336,8 +1349,14 @@ class omega( chem_evol ):
 
                     # Calculate the average SFR for the specific OMEGA timestep
                     if i_dt_csi < self.nb_timesteps:
-                        self.sfr_input[i_dt_csi] = a_csi * (t_csi + \
-                            self.history.timesteps[i_dt_csi] * 0.5) + b_csi
+                        left_sfr[i_dt_csi] = a_csi * t_csi + b_csi
+                        self.sfr_input[i_dt_csi] = left_sfr[i_dt_csi]
+                        if i_dt_csi > 0:
+                            right_sfr[i_dt_csi-1] = a_csi * t_csi + b_csi
+                            self.sfr_input[i_dt_csi-1] = (left_sfr[i_dt_csi-1] + \
+                                    right_sfr[i_dt_csi-1])/2
+                        # self.sfr_input[i_dt_csi] = a_csi * (t_csi + \
+                        #    self.history.timesteps[i_dt_csi] * 0.5) + b_csi
                     else:
                         self.sfr_input[i_dt_csi] = a_csi * t_csi + b_csi
 
