@@ -1,7 +1,6 @@
 # coding=utf-8
 from __future__ import (division, print_function, absolute_import,
                         unicode_literals)
-
 '''
 
 Chemical Evolution - chem_evol.py
@@ -66,6 +65,7 @@ import re
 from pylab import polyfit
 from scipy.integrate import quad
 from scipy.integrate import dblquad
+import importlib
 
 # Define where is the working directory
 nupy_path = os.path.dirname(os.path.realpath(__file__))
@@ -119,11 +119,15 @@ class chem_evol(object):
         Default value : [1,30]
 
     imf_type : string
-        Choices : 'salpeter', 'chabrier', 'kroupa', 'alphaimf', 'lognormal'
+        Choices : 'salpeter', 'chabrier', 'kroupa', 'alphaimf', 'lognormal', 'input'
         'alphaimf' creates a custom IMF with a single power-law covering imf_bdys.
         'lognormal' creates an IMF of the form Exp[1/(2 1^2) Log[x/charMass]^2
 
         Default value : 'kroupa'
+
+    imf_file : string
+        Only valid when use the 'input' imf_type, it should be put in the direction
+        'imf_list'. The function must name as custom_imf. 
 
     alphaimf : float
         Aplha index of the custom IMF, dN/dM = Constant * M^-alphaimf
@@ -273,7 +277,7 @@ class chem_evol(object):
     sn1a_table : string
         Path pointing toward the stellar yield table for SNe Ia.
 
-        Default value : 'yield_tables/sn1a_i99_W7.txt' (Iwamoto et al. 1999)
+        Default value : 'yield_tables/sn1a_t86.txt' (Tielemann et al. 1986)
 
     nsmerger_table : string
         Path pointing toward the r-process yield tables for neutron star mergers
@@ -437,7 +441,7 @@ class chem_evol(object):
     ##############################################
     ##               Constructor                ##
     ##############################################
-    def __init__(self, imf_type='kroupa', alphaimf=2.35, imf_bdys=[0.1,100],\
+    def __init__(self, imf_type='kroupa', imf_file='', alphaimf=2.35, imf_bdys=[0.1,100],\
              sn1a_rate='power_law', iniZ=0.02, dt=1e6, special_timesteps=60,\
              nsmerger_bdys=[8, 100], tend=13e9, mgal=1.0e11, transitionmass=8, iolevel=0,\
              ini_alpha=True, is_sygma=False,\
@@ -563,6 +567,7 @@ class chem_evol(object):
         self.pop3_table = pop3_table
         self.hardsetZ = hardsetZ
         self.imf_type = imf_type
+        self.imf_file = imf_file
         self.alphaimf = alphaimf
         self.sn1a_on = sn1a_on
         self.sn1a_energy=sn1a_energy
@@ -4280,6 +4285,7 @@ class chem_evol(object):
         # If the metallicity is in the PopIII regime ..
         if Z_giy <= self.Z_trans and not is_radio:
 
+            print('Using PopIII now!')
             # Find the lower-mass boundary of the interpolation
             if self.nb_inter_M_points_pop3 < 30:
                 i_M_low = 0
@@ -6962,7 +6968,12 @@ class chem_evol(object):
         if self.imf_type=='input':
 
             # Load the file
-            ci = load_source('custom_imf', os.path.join(nupy_path, 'imf_input.py'))
+            if self.imf_file == None:
+                input_imf = importlib.import_module('NuPyCEE.imf_input')
+            else:
+                input_imf = importlib.import_module('NuPyCEE.imf_list.'+self.imf_file)
+            # ci = load_source('custom_imf', os.path.join(nupy_path, 'imf_input.py'))
+            ci = input_imf.custom_imf
             self.ci = ci
             # Choose the right option
             if inte == 0:
@@ -7193,7 +7204,8 @@ class chem_evol(object):
         '''
 
         # Return the number of stars
-        return self.ci.custom_imf(mass)
+        # return self.ci.custom_imf(mass)
+        return self.ci(mass)
 
 
     ##############################################
@@ -7214,7 +7226,8 @@ class chem_evol(object):
         '''
 
         # Return the total mass of stars
-        return mass * self.ci.custom_imf(mass)
+        # return mass * self.ci.custom_imf(mass)
+        return mass * self.ci(mass)
 
 
     ##############################################
