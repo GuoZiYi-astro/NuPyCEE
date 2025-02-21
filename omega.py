@@ -260,7 +260,6 @@ class omega( chem_evol ):
                  DM_evolution=False, f_dyn=0.1, sfe=0.01, \
                  outflow_rate=-1.0, inflow_rate=-1.0, rand_sfh=0.0, cte_sfr=1.0, \
                  m_DM_0=1.0e12, mass_loading=1.0, t_star=-1.0, sfh_file='none', \
-                 after_sfr_outflowrate = 0.1, \
                  in_out_ratio=1.0, stellar_mass_0=-1.0, \
                  z_dependent=True, exp_ml=2.0, beta_crit=1.0, \
                  omega_0=0.32, omega_b_0=0.05, lambda_0=0.68, H_0=67.11, \
@@ -273,7 +272,9 @@ class omega( chem_evol ):
                  m_inflow_array=[], m_gas_array=[], mdot_ini=[], mdot_ini_t=[], \
                  r_vir_array=[], mass_sampled=[], scale_cor=[], \
                  mass_sampled_ssp=[], m_tot_ISM_t_in=[], \
-                 m_inflow_X_array=[], dt_in_SSPs=[], **kwargs):
+                 m_inflow_X_array=[], dt_in_SSPs=[], \
+                 after_sfr_outflowrate = 0.1, enriched_inflow = False, \
+                 **kwargs):
 
         # Get the name of the instance
         import traceback
@@ -305,6 +306,7 @@ class omega( chem_evol ):
 
         # Attribute the input parameters to the current OMEGA object
         self.galaxy = galaxy
+        self.enriched_inflow = enriched_inflow
         self.in_out_control = in_out_control
         self.SF_law = SF_law
         self.DM_evolution = DM_evolution
@@ -380,13 +382,13 @@ class omega( chem_evol ):
             self.__calc_imf_rnd_param()
 
         # Define whether the open box scenario is used or not
-        if self.in_out_control or self.SF_law or self.DM_evolution:
+        if self.in_out_control or self.SF_law or self.DM_evolution or self.enriched_inflow:
             self.open_box = True
         else:
             self.open_box = False
 
         # Refine timesteps (if needed)
-        if self.SF_law or self.DM_evolution:
+        if self.SF_law or self.DM_evolution or self.enriched_inflow:
             self.__refine_timesteps()
 
         # Declare arrays used to follow the evolution of the galaxy
@@ -456,7 +458,7 @@ class omega( chem_evol ):
             abord = True
 
         # Inflow control when non-available
-        if self.in_out_control and (self.SF_law or self.DM_evolution):
+        if self.in_out_control and (self.SF_law or self.DM_evolution or self.enriched_inflow):
             print ('Error - Cannot control inflows and outflows when SF_law or'\
                   'DM_evolution is equal to True.')
             abord = True
@@ -487,6 +489,12 @@ class omega( chem_evol ):
         if self.len_m_gas_array > 0:
             if not self.len_m_gas_array == (self.nb_timesteps+1):
                 print ('Error - len(m_gas_array) needs to equal nb_timesteps+1.')
+                abord = True
+
+        # When using enriched_inflow mode, must add inflow X array
+        if self.enriched_inflow:
+            if self.len_m_inflow_X_array == 0:
+                print('Error - no m_inflow_X_array')
                 abord = True
 
         # Return whether or not the code should abord
@@ -1332,7 +1340,7 @@ class omega( chem_evol ):
         '''
 
         # Execute this function only if needed
-        if self.in_out_control or self.SF_law or self.DM_evolution:
+        if self.in_out_control or self.SF_law or self.DM_evolution or self.enriched_inflow:
 
             # Calculate the redshift for every timestep, if needed
             self.calculate_redshift_t()
@@ -1982,7 +1990,7 @@ class omega( chem_evol ):
         '''
 
         # Execute this function only if needed
-        if self.SF_law or self.DM_evolution:
+        if self.SF_law or self.DM_evolution or self.enriched_inflow:
 
             # If the star formation timescale is kept constant ...
             if self.t_star > 0:
@@ -2044,7 +2052,7 @@ class omega( chem_evol ):
                 self.m_tot_ISM_t[i_cm] = self.cte_m_gas
 
         # If the mass of gas is tighted to the SFH ...
-        elif self.SF_law or self.DM_evolution:
+        elif self.SF_law or self.DM_evolution or self.enriched_inflow:
 
             # For each timestep ...
             for i_cm in range(0, self.nb_timesteps+1):
@@ -2438,7 +2446,7 @@ class omega( chem_evol ):
                     m_tot_current = sum(self.ymgal[i])
 
                     # Add inflows
-                    if self.len_m_inflow_X_array > 0.0:
+                    if self.len_m_inflow_X_array > 0.0 and not self.enriched_inflow:
                         self.ymgal[i] += self.m_inflow_X_array[i-1]
                         m_inflow_current = self.m_inflow_array[i-1]
                         self.m_inflow_t[i-1] = float(m_inflow_current)
@@ -2449,8 +2457,11 @@ class omega( chem_evol ):
 
                         # Add primordial gas coming with the inflow
                         if m_inflow_current > 0.0:
-                            ym_inflow = self.prim_comp.get(quantity='Yields', Z=0.0) * \
-                                        m_inflow_current
+                            if self.enriched_inflow:
+                                ym_inflow = self.m_inflow_X_array[i-1]*m_inflow_current
+                            else:
+                                ym_inflow = self.prim_comp.get(quantity='Yields', Z=0.0) \
+                                        * m_inflow_current
                             for k_op in range(0, self.nb_isotopes):
                                 self.ymgal[i][k_op] += ym_inflow[k_op]
 
