@@ -4454,7 +4454,7 @@ class chem_evol(object):
             if the_quantity >= quantity[-1]:
                 i_q_low = nb_quantity - 2
             else:
-                if nb_quantity < 30:
+                if nb_quantity < 50:
                     i_q_low = 0
                     while the_quantity > quantity[i_q_low+1]:
                         i_q_low += 1
