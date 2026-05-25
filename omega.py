@@ -240,6 +240,11 @@ class omega( chem_evol ):
         dark and baryonic matter.
 
         Default value : 2.0
+    
+    after_sfr_outflowrate : float
+        After the star formation, the outflow do not ceased, but change to a stable rate to remove gas from the ISM.
+
+        Default value: 0.1
 
     ================
     '''
@@ -252,11 +257,13 @@ class omega( chem_evol ):
     ##               Constructor                ##
     ##############################################
     def __init__(self, galaxy='none', in_out_control=False, SF_law=False, \
-                 DM_evolution=False, f_dyn=0.1, sfe=0.01, outflow_rate=-1.0, \
-                 inflow_rate=-1.0, rand_sfh=0.0, cte_sfr=1.0, m_DM_0=1.0e12, \
+                 DM_evolution=False, f_dyn=0.1, sfe=0.01, \
+                 outflow_rate=-1.0, inflow_rate=-1.0, rand_sfh=0.0, cte_sfr=1.0, \
+                 m_DM_0=1.0e12, mass_loading=1.0, t_star=-1.0, sfh_file='none', \
+                 after_sfr_outflowrate = 0.1, \
+                 in_out_ratio=1.0, stellar_mass_0=-1.0, \
+                 z_dependent=True, exp_ml=2.0, beta_crit=1.0, \
                  omega_0=0.32, omega_b_0=0.05, lambda_0=0.68, H_0=67.11, \
-                 mass_loading=1.0, t_star=-1.0, sfh_file='none', in_out_ratio=1.0, \
-                 stellar_mass_0=-1.0, z_dependent=True, exp_ml=2.0, beta_crit=1.0, \
                  skip_zero=False, redshift_f=0.0, long_range_ref=False,\
                  f_s_enhance=1.0, m_gas_f=-1.0, cl_SF_law=False, \
                  external_control=False, calc_SSP_ej=False, t_sf_z_dep = 1.0, \
@@ -289,6 +296,7 @@ class omega( chem_evol ):
         # Announce the beginning of the simulation
         if not self.print_off:
             print ('OMEGA run in progress..')
+
         start_time = t_module.time()
         self.start_time = start_time
 
@@ -347,6 +355,7 @@ class omega( chem_evol ):
         self.mass_frac_SSP = -1.0
         self.mass_frac_SSP_in = mass_frac_SSP
         self.dt_in_SSPs = dt_in_SSPs
+        self.after_sfr_outflowrate = after_sfr_outflowrate
 
         # Set cosmological parameters - default is Planck 2013 (used in Caterpillar)
         self.omega_0   = omega_0   # Current mass density parameter
@@ -1181,6 +1190,9 @@ class omega( chem_evol ):
 
           path_sfh_in : Path of the input SFH file.
 
+       #### For each time step, the SFR at the interpolated intermediate time
+       #### is used to represent the SFR at that time step. 
+       #### By Z. Guo 2021.12.01
         '''
 
         # Variable to keep track of the OMEGA timestep
@@ -1191,6 +1203,8 @@ class omega( chem_evol ):
 
         # Variable to keep track of the total stellar mass from the input SFH
         m_stel_sfr_in = 0.0
+        left_sfr = np.zeros(self.nb_timesteps)
+        right_sfr = np.zeros(self.nb_timesteps)
 
         # Open the file containing the SFR vs time
         with open(os.path.join(nupy_path, path_sfh_in), 'r') as sfr_file:
@@ -1217,8 +1231,14 @@ class omega( chem_evol ):
 
                     # Calculate the average SFR for the specific OMEGA timestep
                     if i_dt_csi < self.nb_timesteps:
-                        self.sfr_input[i_dt_csi] = a_csi * (t_csi + \
-                            self.history.timesteps[i_dt_csi] * 0.5) + b_csi
+                        left_sfr[i_dt_csi] = a_csi * t_csi + b_csi
+                        self.sfr_input[i_dt_csi] = left_sfr[i_dt_csi]
+                        if i_dt_csi > 0:
+                            right_sfr[i_dt_csi-1] = a_csi * t_csi + b_csi
+                            self.sfr_input[i_dt_csi-1] = (left_sfr[i_dt_csi-1] + \
+                                    right_sfr[i_dt_csi-1])/2
+                        # self.sfr_input[i_dt_csi] = a_csi * (t_csi + \
+                        #    self.history.timesteps[i_dt_csi] * 0.5) + b_csi
                     else:
                         self.sfr_input[i_dt_csi] = a_csi * t_csi + b_csi
 
@@ -2435,7 +2455,9 @@ class omega( chem_evol ):
                                 self.ymgal[i][k_op] += ym_inflow[k_op]
 
                     # Calculate the fraction of gas removed by the outflow
-                    if not (m_tot_current + m_inflow_current) == 0.0:
+                    if self.sfr_input[i] == 0 and self.skip_zero:
+                        frac_rem = self.after_sfr_outflowrate
+                    elif not (m_tot_current + m_inflow_current) == 0.0:
                         if self.len_m_gas_array > 0:
                             self.m_outflow_t[i-1] = (m_tot_current + m_inflow_current) - self.m_gas_array[i]
                             frac_rem = self.m_outflow_t[i-1] / (m_tot_current + m_inflow_current)
@@ -3119,6 +3141,353 @@ class omega( chem_evol ):
         plt.ylabel('$X/X_{\odot}$')
         plt.tick_params(right=True)
 
+    ####Z: This function is used to calculate or plot the evolution of the alive stellar mass.
+    def plot_star(self, imf_m, return_x_y = False, **kwargs):
+        from matplotlib import pyplot as plt
+        alive_stellar_mass = self.cal_star_mass(imf_m)
+        if not return_x_y:
+            plt.plot(self.history.age[1:]/1e9, alive_stellar_mass, **kwargs)
+            plt.xlabel('Hubble time [Gyr]')
+            plt.ylabel(r'$\rm M_{\star}$ [M$_{\odot}$]')
+        else:
+            return self.history.age[1:], alive_stellar_mass
+    
+    ####Z: This function is used to plot the number distribution of the abundances.
+    def plot_iso_num_distribution(self, imf_m, imf_n, t = None, x_range = None,  bins = 50, x_axis = '[O/H]', return_x_y = False, **kwargs):
+        from matplotlib import pyplot as plt
+        import copy
+        if t is None:
+            t = self.history.age[-1]
+        time = copy.copy(self.history.age)
+        t_diff = abs(time-t)
+        idx = np.where(t_diff == min(t_diff))[0][0]
+        if idx >= self.nb_timesteps:
+            idx = self.nb_timesteps-1
+        stellar_num = self.cal_star_num(imf_m, imf_n,idx)
+        if '[' in x_axis:
+            age, abu = self.plot_spectro(xaxis = 'age', yaxis = x_axis, return_x_y = True)
+        star_sum, bin_edges = np.histogram(abu[:idx], bins=bins, weights=stellar_num, range = x_range)
+        bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
+        if not return_x_y:
+            plt.step(bin_centers, star_sum)
+            plt.xlabel(x_axis)
+            plt.ylabel(r'$\rm N_{\star}$')
+        else:
+            return bin_centers, star_sum
+    
+    ####Z: calculate accurate alive stellar number at time
+    def cal_star_num(self, imf_m, imf_n, idx):
+        m_low = np.ones((idx, idx))*self.imf_bdys[0]
+        m_locked = self.history.m_locked[:idx]
+        massive_star_per_timestep = self.massive_star_per_timestep[:idx,:idx]
+        imf_num = imf_n(m_low, massive_star_per_timestep)
+        A_imf = 1/imf_m(self.imf_bdys[0], self.imf_bdys[1])
+        alive_stellar_num = m_locked@(A_imf*imf_num)
+        return alive_stellar_num
+
+    ####Z: calculate accurate alive stellar mass
+    def cal_star_mass(self, imf_m):
+        m_low = np.ones((self.nb_timesteps, self.nb_timesteps))*self.imf_bdys[0]
+        m_locked = self.history.m_locked
+        massive_star_per_timestep = self.massive_star_per_timestep[:,:-1]
+        imf_mass = imf_m(m_low, massive_star_per_timestep)
+        A_imf = 1/imf_m(self.imf_bdys[0], self.imf_bdys[1])
+        alive_stellar_mass = m_locked@(A_imf*imf_mass)
+        return alive_stellar_mass
+
+    ####Z: vectorized version of IMF calculation
+    def get_vectorize_imf(self, alpha1=-0.3, alpha2=-1.3, alpha3=-2.3, imf_type = 'kroupa01'):
+    
+        import numpy as np
+        if imf_type == 'kroupa01':
+    
+            # Kroupa 2001 break points
+            b0 = 0.01
+            b1 = 0.08
+            b2 = 0.50
+    
+            # continuity factors (xi(m) ∝ m^alpha)
+            C1 = b1**(alpha1 - alpha2)
+            C2 = C1 * b2**(alpha2 - alpha3)
+    
+            # -------------------------------
+            # Number integral ∫ m^alpha dm
+            # -------------------------------
+            def integral_number(m1, m2, alpha):
+                p = alpha + 1
+                if p != 0:
+                    return (m2**p - m1**p) / p
+                else:
+                    return np.log(m2 / m1)
+    
+            # -------------------------------
+            # Mass integral ∫ m * xi(m) dm = ∫ m^(alpha+1) dm
+            # -------------------------------
+            def integral_mass(m1, m2, alpha):
+                p = alpha + 2
+                if p != 0:
+                    return (m2**p - m1**p) / p
+                else:
+                    return np.log(m2 / m1)
+    
+            # ===============================
+            #   NUMBER IMF
+            # ===============================
+            def imf_n(m_low, m_up):
+                m_low = np.clip(np.asarray(m_low, float), *self.imf_bdys)
+                m_up  = np.clip(np.asarray(m_up,  float), *self.imf_bdys)
+    
+                num = np.zeros_like(m_low)
+    
+                mask0 = (m_up <= b1)
+                mask2 = (m_low >= b2)
+                mask1 = ~(mask0 | mask2)
+    
+                if np.any(mask0):
+                    num[mask0] = integral_number(m_low[mask0], m_up[mask0], alpha1)
+    
+                if np.any(mask2):
+                    num[mask2] = C2 * integral_number(m_low[mask2], m_up[mask2], alpha3)
+    
+                if np.any(mask1):
+                    ml, mu = m_low[mask1], m_up[mask1]
+                    part = np.zeros_like(ml)
+    
+                    # [b0, b1]
+                    m = ml < b1
+                    if np.any(m):
+                        part[m] += integral_number(ml[m], np.minimum(mu[m], b1), alpha1)
+    
+                    # [b1, b2]
+                    m = (mu > b1) & (ml < b2)
+                    if np.any(m):
+                        part[m] += C1 * integral_number(
+                            np.maximum(ml[m], b1),
+                            np.minimum(mu[m], b2),
+                            alpha2
+                        )
+    
+                    # > b2
+                    m = mu > b2
+                    if np.any(m):
+                        part[m] += C2 * integral_number(
+                            np.maximum(ml[m], b2), mu[m], alpha3
+                        )
+    
+                    num[mask1] = part
+    
+                return num
+    
+            # ===============================
+            #   MASS IMF
+            # ===============================
+            def imf_m(m_low, m_up):
+                m_low = np.clip(np.asarray(m_low, float), *self.imf_bdys)
+                m_up  = np.clip(np.asarray(m_up,  float), *self.imf_bdys)
+    
+                mass = np.zeros_like(m_low)
+    
+                mask0 = (m_up <= b1)
+                mask2 = (m_low >= b2)
+                mask1 = ~(mask0 | mask2)
+    
+                if np.any(mask0):
+                    mass[mask0] = integral_mass(m_low[mask0], m_up[mask0], alpha1)
+    
+                if np.any(mask2):
+                    mass[mask2] = C2 * integral_mass(m_low[mask2], m_up[mask2], alpha3)
+    
+                if np.any(mask1):
+                    ml, mu = m_low[mask1], m_up[mask1]
+                    part = np.zeros_like(ml)
+    
+                    m = ml < b1
+                    if np.any(m):
+                        part[m] += integral_mass(ml[m], np.minimum(mu[m], b1), alpha1)
+    
+                    m = (mu > b1) & (ml < b2)
+                    if np.any(m):
+                        part[m] += C1 * integral_mass(
+                            np.maximum(ml[m], b1),
+                            np.minimum(mu[m], b2),
+                            alpha2
+                        )
+    
+                    m = mu > b2
+                    if np.any(m):
+                        part[m] += C2 * integral_mass(
+                            np.maximum(ml[m], b2), mu[m], alpha3
+                        )
+    
+                    mass[mask1] = part
+    
+                return mass
+    
+            print('This function returns IMF number and mass integrals.')
+
+        if imf_type == 'chabrier03':
+            import math
+            mc = 0.22
+            sigma = 0.57
+
+
+            # -------------------------------
+            # Chabrier-like IMF:
+            #
+            # low-mass  : xi(m) ∝ (1/m) * exp[-(log10(m)-log10(mc))^2 / (2 sigma^2)]
+            # high-mass : xi(m) ∝ C * m^alpha3
+            #
+            # break point at 1 Msun
+            # -------------------------------
+
+            b1 = 1.0
+
+            # convert log10 parameters to natural-log form
+            ln10 = np.log(10.0)
+            mu = np.log(mc)          # = ln(mc)
+            s = sigma * ln10         # sigma in ln-space
+
+            # vectorized erf
+            erf = np.vectorize(math.erf)
+
+            # continuity factor at m = 1
+            # low-mass branch evaluated at m=1:
+            # xi_low(1) = exp[-(log10(1)-log10(mc))^2 / (2 sigma^2)]
+            C = np.exp(-(np.log10(1.0) - np.log10(mc))**2 / (2.0 * sigma**2))
+
+            # -------------------------------
+            # Number integral for low-mass lognormal branch
+            # xi(m) ∝ (1/m) exp[-(log10(m)-log10(mc))^2/(2 sigma^2)]
+            #
+            # Let x = ln(m), then:
+            # ∫ xi(m) dm = ∫ exp[-(x-mu)^2/(2 s^2)] dx
+            #            = s * sqrt(pi/2) * erf(...)
+            # -------------------------------
+            def integral_number_lognormal(m1, m2):
+                x1 = np.log(m1)
+                x2 = np.log(m2)
+                pref = s * np.sqrt(np.pi / 2.0)
+                z1 = (x1 - mu) / (np.sqrt(2.0) * s)
+                z2 = (x2 - mu) / (np.sqrt(2.0) * s)
+                return pref * (erf(z2) - erf(z1))
+
+            # -------------------------------
+            # Mass integral for low-mass lognormal branch
+            # ∫ m * xi(m) dm = ∫ exp[-(log10(m)-log10(mc))^2/(2 sigma^2)] dm
+            #
+            # In ln-space:
+            # ∫ exp[-(x-mu)^2/(2 s^2)] * e^x dx
+            # = exp(mu + s^2/2) * s * sqrt(pi/2) * erf(...)
+            # -------------------------------
+            def integral_mass_lognormal(m1, m2):
+                x1 = np.log(m1)
+                x2 = np.log(m2)
+                pref = np.exp(mu + 0.5 * s**2) * s * np.sqrt(np.pi / 2.0)
+                z1 = (x1 - (mu + s**2)) / (np.sqrt(2.0) * s)
+                z2 = (x2 - (mu + s**2)) / (np.sqrt(2.0) * s)
+                return pref * (erf(z2) - erf(z1))
+
+            # -------------------------------
+            # Power-law integrals for high-mass branch
+            # -------------------------------
+            def integral_number_powerlaw(m1, m2, alpha):
+                p = alpha + 1
+                if p != 0:
+                    return (m2**p - m1**p) / p
+                else:
+                    return np.log(m2 / m1)
+
+            def integral_mass_powerlaw(m1, m2, alpha):
+                p = alpha + 2
+                if p != 0:
+                    return (m2**p - m1**p) / p
+                else:
+                    return np.log(m2 / m1)
+
+            # ===============================
+            #   NUMBER IMF
+            # ===============================
+            def imf_n(m_low, m_up):
+                m_low = np.clip(np.asarray(m_low, float), *self.imf_bdys)
+                m_up  = np.clip(np.asarray(m_up,  float), *self.imf_bdys)
+
+                num = np.zeros_like(m_low)
+
+                mask_low  = (m_up <= b1)
+                mask_high = (m_low >= b1)
+                mask_mid  = ~(mask_low | mask_high)
+
+                # entirely in lognormal branch
+                if np.any(mask_low):
+                    num[mask_low] = integral_number_lognormal(
+                        m_low[mask_low], m_up[mask_low]
+                    )
+
+                # entirely in power-law branch
+                if np.any(mask_high):
+                    num[mask_high] = C * integral_number_powerlaw(
+                        m_low[mask_high], m_up[mask_high], alpha3
+                    )
+
+                # crossing the break at 1 Msun
+                if np.any(mask_mid):
+                    ml, mu_ = m_low[mask_mid], m_up[mask_mid]
+                    part = np.zeros_like(ml)
+
+                    # low-mass lognormal part
+                    part += integral_number_lognormal(ml, np.minimum(mu_, b1))
+
+                    # high-mass power-law part
+                    part += C * integral_number_powerlaw(
+                        np.maximum(ml, b1), mu_, alpha3
+                    )
+
+                    num[mask_mid] = part
+
+                return num
+
+            # ===============================
+            #   MASS IMF
+            # ===============================
+            def imf_m(m_low, m_up):
+                m_low = np.clip(np.asarray(m_low, float), *self.imf_bdys)
+                m_up  = np.clip(np.asarray(m_up,  float), *self.imf_bdys)
+
+                mass = np.zeros_like(m_low)
+
+                mask_low  = (m_up <= b1)
+                mask_high = (m_low >= b1)
+                mask_mid  = ~(mask_low | mask_high)
+
+                # entirely in lognormal branch
+                if np.any(mask_low):
+                    mass[mask_low] = integral_mass_lognormal(
+                        m_low[mask_low], m_up[mask_low]
+                    )
+
+                # entirely in power-law branch
+                if np.any(mask_high):
+                    mass[mask_high] = C * integral_mass_powerlaw(
+                        m_low[mask_high], m_up[mask_high], alpha3
+                    )
+
+                # crossing the break at 1 Msun
+                if np.any(mask_mid):
+                    ml, mu_ = m_low[mask_mid], m_up[mask_mid]
+                    part = np.zeros_like(ml)
+
+                    # low-mass lognormal part
+                    part += integral_mass_lognormal(ml, np.minimum(mu_, b1))
+
+                    # high-mass power-law part
+                    part += C * integral_mass_powerlaw(
+                        np.maximum(ml, b1), mu_, alpha3
+                    )
+
+                    mass[mask_mid] = part
+
+                return mass
+        return imf_n, imf_m
 
     def plot_mass(self,fig=0,specie='C',source='all',norm=False,label='',shape='',marker='',color='',markevery=20,multiplot=False,return_x_y=False,fsize=[10,4.5],fontsize=14,rspace=0.6,bspace=0.15,labelsize=15,legend_fontsize=14,show_legend=True):
 
@@ -3247,7 +3616,7 @@ class omega( chem_evol ):
             #self.save_data(header=['Age[yrs]',specie],data=[x,y])
 
 
-    def plot_massfrac(self,fig=2,xaxis='age',yaxis='O-16',source='all',norm='no',label='',shape='',marker='',color='',markevery=20,fsize=[10,4.5],fontsize=14,rspace=0.6,bspace=0.15,labelsize=15,legend_fontsize=14):
+    def plot_massfrac(self,fig=2,xaxis='age',yaxis='O-16',source='all',norm='no',label='',shape='',marker='',color='',markevery=20,fsize=[10,4.5],fontsize=14,rspace=0.6,bspace=0.15,labelsize=15,legend_fontsize=14,return_x_y=False):
 
         '''
         Plots mass fraction of isotope or element
@@ -3299,8 +3668,8 @@ class omega( chem_evol ):
                 label=yaxis
 
         shape,marker,color=self.__msc(source,shape,marker,color)
-
-        plt.figure(fig, figsize=(fsize[0],fsize[1]))
+        if not return_x_y:
+            plt.figure(fig, figsize=(fsize[0],fsize[1]))
 
         #Input X-axis
         if '-' in xaxis:
@@ -3320,16 +3689,19 @@ class omega( chem_evol ):
                    x.append(yields_evol[k][iso_idx]/np.sum(yields_evol[k]))
                if norm=='ini':
                    x.append(yields_evol[k][iso_idx]/np.sum(yields_evol[k])/yields_evol[0][iso_idx])
-            plt.xlabel('log-scaled X('+xaxis+')')
-            plt.xscale('log')
+            if not return_x_y:
+                plt.xlabel('log-scaled X('+xaxis+')')
+                plt.xscale('log')
         elif 'age' == xaxis:
             x=self.history.age#[1:]
-            plt.xscale('log')
-            plt.xlabel('log-scaled Age [yrs]')
+            if not return_x_y:
+                plt.xscale('log')
+                plt.xlabel('log-scaled Age [yrs]')
         elif 'Z' == xaxis:
             x=self.history.metallicity#[1:]
-            plt.xlabel('ISM metallicity')
-            plt.xscale('log')
+            if not return_x_y:
+                plt.xlabel('ISM metallicity')
+                plt.xscale('log')
         elif xaxis in self.history.elements:
             if source == 'all':
                 yields_evol=self.history.ism_elem_yield
@@ -3347,9 +3719,9 @@ class omega( chem_evol ):
                 if norm=='ini':
                     x.append(yields_evol[k][iso_idx]/np.sum(yields_evol[k])/yields_evol[0][iso_idx])
                     print (yields_evol[0][iso_idx])
-
-            plt.xlabel('log-scaled X('+xaxis+')')
-            plt.xscale('log')
+            if not return_x_y:
+                plt.xlabel('log-scaled X('+xaxis+')')
+                plt.xscale('log')
 
 
         #Input Y-axis
@@ -3378,13 +3750,15 @@ class omega( chem_evol ):
                     y.append(yields_evol[k][iso_idx]/np.sum(yields_evol[k])/yields_evol[0][iso_idx])
 
                 x.append(x_age[k])
-            plt.ylabel('X('+yaxis+')')
             self.y=y
-            plt.yscale('log')
+            if not return_x_y:
+                plt.ylabel('X('+yaxis+')')
+                plt.yscale('log')
         elif 'Z' == yaxis:
             y=self.history.metallicity
-            plt.ylabel('ISM metallicity')
-            plt.yscale('log')
+            if not return_x_y:
+                plt.ylabel('ISM metallicity')
+                plt.yscale('log')
         elif yaxis in self.history.elements:
             if source == 'all':
                 yields_evol=self.history.ism_elem_yield
@@ -3410,19 +3784,24 @@ class omega( chem_evol ):
 
                 x.append(x_age[k])
             #plt.yscale('log')
-            plt.ylabel('X('+yaxis+')')
             self.y=y
-            plt.yscale('log')
+            if not return_x_y:
+                plt.ylabel('X('+yaxis+')')
+                plt.yscale('log')
         #To prevent 0 +log scale
         if 'age' == xaxis:
                 x=x[1:]
                 y=y[1:]
-                plt.xlim(self.history.dt,self.history.tend)
-        plt.plot(x,y,label=label,linestyle=shape,marker=marker,color=color,markevery=markevery)
-        plt.legend()
-        ax=plt.gca()
-        self.__fig_standard(ax=ax,fontsize=fontsize,labelsize=labelsize,rspace=rspace, bspace=bspace,legend_fontsize=legend_fontsize)
-        self.save_data(header=[xaxis,yaxis],data=[x,y])
+                if not return_x_y:
+                    plt.xlim(self.history.dt,self.history.tend)
+        if return_x_y:
+            return x,y
+        else:
+            plt.plot(x,y,label=label,linestyle=shape,marker=marker,color=color,markevery=markevery)
+            plt.legend()
+            ax=plt.gca()
+            self.__fig_standard(ax=ax,fontsize=fontsize,labelsize=labelsize,rspace=rspace, bspace=bspace,legend_fontsize=legend_fontsize)
+            self.save_data(header=[xaxis,yaxis],data=[x,y])
 
     def plot_spectro(self,fig=3,xaxis='age',yaxis='[Fe/H]',source='all',label='',shape='-',marker='o',color='k',markevery=100,show_data=False,show_sculptor=False,show_legend=True,return_x_y=False,sub_plot=False,linewidth=3,sub=1,plot_data=False,fsize=[10,4.5],fontsize=14,rspace=0.6,bspace=0.15,labelsize=15,legend_fontsize=14,only_one_iso=False,solar_ab='',sfr_thresh=0.0,m_formed_thresh=1.0,solar_norm=''):
         '''
@@ -3756,13 +4135,17 @@ class omega( chem_evol ):
             self.__fig_standard(ax=ax,fontsize=fontsize,labelsize=labelsize,rspace=rspace, bspace=bspace,legend_fontsize=legend_fontsize)
             #self.save_data(header=[xaxis,yaxis],data=[x,y])
 
-
-    def plot_totmasses(self,fig=4,source='all',norm='no',label='',shape='',marker='',color='',markevery=20,log=True,fsize=[10,4.5],fontsize=14,rspace=0.6,bspace=0.15,labelsize=15,legend_fontsize=14):
+    def plot_totmasses(self,fig=4,mass='gas',source='all',norm='no',label='',shape='',marker='',color='',markevery=20,log=True,fsize=[10,4.5],fontsize=14,rspace=0.6,bspace=0.15,labelsize=15,legend_fontsize=14,return_x_y=False):
         '''
-        Plots gas mass in fraction of total mass vs time.
+        Plots either gas or star mass in fraction of total mass
+        vs time.
 
         Parameters
         ----------
+
+        mass : string
+            either 'gas' for ISM gas mass
+            or 'stars' for gas locked away in stars (totalgas - ISM gas)
 
         norm : string
             normalization, either 'no' for no normalization (total gass mass in solar masses),
@@ -3806,8 +4189,8 @@ class omega( chem_evol ):
         #if len(label)<1:
         #        label=mass+', '+source
 
-
-        plt.figure(fig, figsize=(fsize[0],fsize[1]))
+        if not return_x_y:
+            plt.figure(fig, figsize=(fsize[0],fsize[1]))
 
         #Assume isotope input
 
@@ -3829,8 +4212,9 @@ class omega( chem_evol ):
 
         if 'age' == xaxis:
             x_all=self.history.age#[1:]
-            plt.xscale('log')
-            plt.xlabel('log-scaled '+xaxis+' [yrs]')
+            if not return_x_y:
+                plt.xscale('log')
+                plt.xlabel('log-scaled '+xaxis+' [yrs]')
             #self.x=x
 
         gas_mass=self.history.gas_mass
@@ -3874,45 +4258,44 @@ class omega( chem_evol ):
             elif norm == 'no':
                 ism_gasm.append(gas_evol[k])
                 star_m.append(self.history.mgal-gas_evol[k])
-
-        mass = 'gas'
-        #TODO This is a quick fix to remove input mass option (should rewrite the whole function)
-
         if mass == 'gas':
             y=ism_gasm
         if mass == 'stars':
             y=star_m
-        plt.plot(x,y,linestyle=shape,marker=marker,markevery=markevery,color=color,label=label)
-        if len(label)>0:
-            plt.legend()
-        if norm=='current':
-            plt.ylim(0,1.2)
-        if not norm=='no':
-            if mass=='gas':
-                plt.ylabel('mass fraction')
-                plt.title('Gas mass as a fraction of total gas mass')
-            else:
-                plt.ylabel('mass fraction')
-                plt.title('Star mass as a fraction of total star mass')
-        else:
-            if mass=='gas':
-                plt.ylabel('ISM gas mass [Msun]')
-            else:
-                plt.ylabel('mass locked in stars [Msun]')
-
-            if mass=='gas':
-                plt.ylabel('ISM gas mass [Msun]')
-            else:
-                plt.ylabel('Mass locked in stars [Msun]')
-
-        if log==True:
-            plt.yscale('log')
+        if not return_x_y:
+            plt.plot(x,y,linestyle=shape,marker=marker,markevery=markevery,color=color,label=label)
+            if len(label)>0:
+                plt.legend()
+            if norm=='current':
+                plt.ylim(0,1.2)
             if not norm=='no':
-                plt.ylim(1e-4,1.2)
-        ax=plt.gca()
-        self.__fig_standard(ax=ax,fontsize=fontsize,labelsize=labelsize,rspace=rspace, bspace=bspace,legend_fontsize=legend_fontsize)
-        plt.xlim(self.history.dt,self.history.tend)
-        #self.save_data(header=['age','mass'],data=[x,y])
+                if mass=='gas':
+                    plt.ylabel('mass fraction')
+                    plt.title('Gas mass as a fraction of total gas mass')
+                else:
+                    plt.ylabel('mass fraction')
+                    plt.title('Star mass as a fraction of total star mass')
+            else:
+                if mass=='gas':
+                    plt.ylabel('ISM gas mass [Msun]')
+                else:
+                    plt.ylabel('mass locked in stars [Msun]')
+
+                if mass=='gas':
+                    plt.ylabel('ISM gas mass [Msun]')
+                else:
+                    plt.ylabel('Mass locked in stars [Msun]')
+
+            if log==True:
+                plt.yscale('log')
+                if not norm=='no':
+                    plt.ylim(1e-4,1.2)
+            ax=plt.gca()
+            self.__fig_standard(ax=ax,fontsize=fontsize,labelsize=labelsize,rspace=rspace, bspace=bspace,legend_fontsize=legend_fontsize)
+            plt.xlim(self.history.dt,self.history.tend)
+            #self.save_data(header=['age','mass'],data=[x,y])
+        else:
+            return x,y
 
 
     def plot_sn_distr(self,fig=5,rate=True,rate_only='',xaxis='time',fraction=False,label1='SNIa',label2='SN2',shape1=':',shape2='--',marker1='o',marker2='s',color1='k',color2='b',markevery=20,fsize=[10,4.5],fontsize=14,rspace=0.6,bspace=0.15,labelsize=15,legend_fontsize=14):
@@ -4134,7 +4517,7 @@ class omega( chem_evol ):
     ##############################################
     #          Plot Star Formation Rate          #
     ##############################################
-    def plot_star_formation_rate(self,fig=6,fraction=False,source='all',marker='',shape='',color='',label='',abs_unit=True,fsize=[10,4.5],fontsize=14,rspace=0.6,bspace=0.15,labelsize=15,legend_fontsize=14):
+    def plot_star_formation_rate(self,fig=6,fraction=False,source='all',marker='',shape='',color='',label='',abs_unit=True,fsize=[10,4.5],fontsize=14,rspace=0.6,bspace=0.15,labelsize=15,legend_fontsize=14,return_x_y=False):
         '''
 
         Plots the star formation rate over time.
@@ -4168,9 +4551,9 @@ class omega( chem_evol ):
 
         if (len(marker)==0 and len(shape)==0) and len(color)==0:
             shape,marker,color=self.__msc(source,shape,marker,color)
-        plt.figure(fig, figsize=(fsize[0],fsize[1]))
         #maybe a histogram for display the SFR?
         if False:
+                plt.figure(fig, figsize=(fsize[0],fsize[1]))
                 age=self.history.age
                 #age=[0.1]+self.history.age[1:-1]
                 sfr=self.history.sfr
@@ -4202,12 +4585,16 @@ class omega( chem_evol ):
             #sfr_plot = self.history.m_locked / self.history.timesteps
             sfr_plot = self.history.sfr_abs
 
+            if return_x_y:
+                return age[:-1],sfr_plot[:-1]
+            else:
+                plt.figure(fig, figsize=(fsize[0],fsize[1]))
+                plt.plot(age[:-1],sfr_plot[:-1],label=label,marker=marker,color=color,linestyle=shape)
+
             #Label and display axis
             plt.xlabel('Age [yrs]')
             plt.ylabel('SFR [Mo/yr]')
-
             #Plot
-            plt.plot(age[:-1],sfr_plot[:-1],label=label,marker=marker,color=color,linestyle=shape)
 
             #self.save_data(header=['age','SFR'],data=[age,sfr_plot])
 
@@ -4428,7 +4815,7 @@ class omega( chem_evol ):
     ##############################################
     def plot_outflow_rate(self,fig=9,marker='',shape='',\
             color='',label='Outflow',fsize=[10,4.5],fontsize=14,rspace=0.6,\
-            bspace=0.15,labelsize=15,legend_fontsize=14):
+            bspace=0.15,labelsize=15,legend_fontsize=14,return_x_y=False):
 
         '''
         This function plots the mass outflow rate as a function of time
@@ -4495,6 +4882,9 @@ class omega( chem_evol ):
             #Plot data
             plt.plot(age,outflow_plot,label=label,marker=marker,\
                      color=color,linestyle=shape)
+
+            if return_x_y:
+                return age, outflow_plot 
 
             #Save plot
             #self.save_data(header=['age','outflow rate'],data=[age,outflow_plot])
@@ -5061,7 +5451,11 @@ class omega( chem_evol ):
             for k in range(0,len(yields_evol)):
                 if xaxis_ratio:
                     x.append(yields_evol[k][idx_1]/yields_evol[k][idx_2])
-                y.append(yields_evol[k][idy_1]/yields_evol[k][idy_2])
+                # y.append(yields_evol[k][idy_1]/yields_evol[k][idy_2])
+                if yields_evol[k][idy_2]==0:
+                    y.append(0)
+                else:
+                    y.append(yields_evol[k][idy_1]/yields_evol[k][idy_2])
 
         # Make sure the length of array are the same when xaxis = '[X/Y]'
         too_much = len(y)-len(x)

@@ -113,15 +113,9 @@ class sygma( chem_evol ):
 
                 'schmidt' - use an adapted Schmidt law (see Timmes95)
 
-        Default value : 'input'
+                'all' - all the gas will be used to form stars in the first timestep.
 
-    mass_sampled : list
-        Stellar masses that are sampled to eject yields in a stellar population.
-        Warning : The use of this parameter bypasses the IMF calculation and
-        do not ensure a correlation with the star formation rate.  Each sampled
-        mass will eject the exact amount of mass give in the stellar yields.
-
-        Default value : np.array([]) --> Deactivated
+        Default value : 'all'
 
     ================
     '''
@@ -132,7 +126,7 @@ class sygma( chem_evol ):
     #                Constructor                 #
     ##############################################
     def __init__(self, sfr='input', no_sf=False, mass_sampled=[], \
-                 scale_cor=[], **kwargs):
+                 scale_cor=[], sfrin = 1, **kwargs):
 
         # Overwrite default chem_evol parameters (if needed)
         kwargs["is_sygma"] = True
@@ -152,11 +146,13 @@ class sygma( chem_evol ):
         # Attribute the input parameter to the current object
         self.no_sf = no_sf
         self.sfr = sfr
+        self.sfrin = sfrin
         self.mass_sampled = mass_sampled
         self.scale_cor = scale_cor
 
         # Get the SFR of every timestep
-        self.sfrin_i = self.__sfr()
+        ### Z: I add a new input parameter named sfrin, when you choose sfr == 'input', than you can use the sfrin to input the fraction stars.
+        self.sfrin_i = self.__sfr(sfr)
 
         # Run the simulation
         self.__run_simulation()
@@ -205,7 +201,7 @@ class sygma( chem_evol ):
     ##############################################
     #                    SFR                     #
     ##############################################
-    def __sfr(self):
+    def __sfr(self, sfr_type):
 
         '''
         This function calculates the percentage of gas mass which transforms into
@@ -216,7 +212,10 @@ class sygma( chem_evol ):
         # Return the SFR (mass fraction) of every timestep
         sfr_i = np.zeros(self.nb_timesteps+1)
         if not self.no_sf:
-            sfr_i[0] = 1.0
+            if sfr_type == 'all':
+                sfr_i[0] = 1.0
+            elif sfr_type == 'input':
+                sfr_i[0] = self.sfrin
         return sfr_i
 
 
@@ -580,9 +579,8 @@ class sygma( chem_evol ):
 
         ax=plt.gca()
         self.__fig_standard(ax=ax,fontsize=fontsize,labelsize=labelsize,rspace=rspace, bspace=bspace,legend_fontsize=legend_fontsize)
-        
-        
-        
+
+
     def plot_table_yield(self, yaxis, xaxis, Z, masses = [], solar_abunds = 'yield_tables/iniabu/iniab2.0E-02GN93.ppn'):
     
         '''Plots yields vesus either initial mass or [X/Y].
@@ -770,7 +768,6 @@ class sygma( chem_evol ):
                 plt.ylabel('[X/Y]')
             plt.legend()
 
-
     def plot_net_yields(self,fig=91,species='[C-12/Fe-56]',netyields_iniabu='yield_tables/iniabu/iniab_solar_Wiersma.ppn'):
 
         '''
@@ -824,8 +821,6 @@ class sygma( chem_evol ):
         plt.ylabel(species)
         plt.xlabel('initial mass [M$_{\odot}$]')
         #plt.xscale('log')
-
-
 
     def plot_mass_ratio(self,fig=0,xaxis='age',species_ratio='C/N',source='all',label='',shape='',marker='',color='',markevery=20,multiplot=False,return_x_y=False,fsize=[10,4.5],fontsize=14,rspace=0.6,bspace=0.15,labelsize=15,legend_fontsize=14,logy=True):
 
@@ -2124,7 +2119,7 @@ class sygma( chem_evol ):
         #print ('Total mass transformed in stars, total mass transformed in AGBs, total mass transformed in massive stars:')
         #print (sum(self.history.m_locked),sum(self.history.m_locked_agb),sum(self.history.m_locked_massive))
 
-    def plot_mass_range_contributions(self,fig=7,specie='C',label='',shape='-',marker='o',color='r',extralabel=False,log=False,fsize=[10,4.5],fontsize=14,rspace=0.6,bspace=0.15,labelsize=15,legend_fontsize=14, histtype="stepfilled"):
+    def plot_mass_range_contributions(self,fig=7,specie='C',label='',shape='-',marker='o',color='r',extralabel=False,log=False,fsize=[10,4.5],fontsize=14,rspace=0.6,bspace=0.15,labelsize=15,legend_fontsize=14, histtype="stepfilled",return_x_y=False):
 
 
         '''
@@ -2173,7 +2168,6 @@ class sygma( chem_evol ):
                     iso_index.append(i_iso)
 
         import matplotlib.pyplot as plt
-        figure=plt.figure(fig, figsize=(fsize[0],fsize[1]))
 
         # Set the IMF binning
         dm = 1.0
@@ -2221,32 +2215,36 @@ class sygma( chem_evol ):
 
         # Plot
         m_arr_y_zero = np.zeros(len(m_arr_y))
-        p1 = plt.fill_between(m_arr, m_arr_y_zero, m_arr_y, color=color,alpha=0.5, label=label)
+        if return_x_y:
+            return m_arr, m_arr_y_zero, m_arr_y
+        else:
+            figure=plt.figure(fig, figsize=(fsize[0],fsize[1]))
+            p1 = plt.fill_between(m_arr, m_arr_y_zero, m_arr_y, color=color,alpha=0.5, label=label)
 
-        #'''
-        if len(label)>0:
-                plt.legend()
-        ax1=plt.gca()
+            #'''
+            if len(label)>0:
+                    plt.legend()
+            ax1=plt.gca()
 
-        #ax1.set_ylim(bottom=0)
-        ax1.set_xlabel('Initial mass [M$_{\odot}$]')
-        ax1.set_ylabel('IMF-weighted yield [M$_{\odot}$]')
-        if log==True:
-                ax1.set_yscale('log')
-        lwtickboth=[6,2]
-        lwtickmajor=[10,3]
-        plt.xlim(the_bdys[0],the_bdys[1])
-        plt.legend(loc=2,prop={'size':legend_fontsize})
-        plt.rcParams.update({'font.size': fontsize})
-        ax1.yaxis.label.set_size(labelsize)
-        ax1.xaxis.label.set_size(labelsize)
-        ax1.tick_params(length=lwtickboth[0],width=lwtickboth[1],which='both')
-        ax1.tick_params(length=lwtickmajor[0],width=lwtickmajor[1],which='major')
-        ax1.legend(loc='center left', bbox_to_anchor=(1.01, 0.5),markerscale=0.8,fontsize=legend_fontsize)
-        plt.subplots_adjust(right=rspace)
-        plt.subplots_adjust(bottom=bspace)
+            #ax1.set_ylim(bottom=0)
+            ax1.set_xlabel('Initial mass [M$_{\odot}$]')
+            ax1.set_ylabel('IMF-weighted yield [M$_{\odot}$]')
+            if log==True:
+                    ax1.set_yscale('log')
+            lwtickboth=[6,2]
+            lwtickmajor=[10,3]
+            plt.xlim(the_bdys[0],the_bdys[1])
+            plt.legend(loc=2,prop={'size':legend_fontsize})
+            plt.rcParams.update({'font.size': fontsize})
+            ax1.yaxis.label.set_size(labelsize)
+            ax1.xaxis.label.set_size(labelsize)
+            ax1.tick_params(length=lwtickboth[0],width=lwtickboth[1],which='both')
+            ax1.tick_params(length=lwtickmajor[0],width=lwtickmajor[1],which='major')
+            ax1.legend(loc='center left', bbox_to_anchor=(1.01, 0.5),markerscale=0.8,fontsize=legend_fontsize)
+            plt.subplots_adjust(right=rspace)
+            plt.subplots_adjust(bottom=bspace)
+            return
 
-        return
 
 
     ##############################################

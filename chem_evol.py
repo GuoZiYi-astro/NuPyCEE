@@ -1,7 +1,6 @@
 # coding=utf-8
 from __future__ import (division, print_function, absolute_import,
                         unicode_literals)
-
 '''
 
 Chemical Evolution - chem_evol.py
@@ -66,6 +65,7 @@ import re
 from pylab import polyfit
 from scipy.integrate import quad
 from scipy.integrate import dblquad
+import importlib
 
 # Define where is the working directory
 nupy_path = os.path.dirname(os.path.realpath(__file__))
@@ -119,11 +119,15 @@ class chem_evol(object):
         Default value : [1,30]
 
     imf_type : string
-        Choices : 'salpeter', 'chabrier', 'kroupa', 'alphaimf', 'lognormal'
+        Choices : 'salpeter', 'chabrier', 'kroupa', 'alphaimf', 'lognormal', 'input'
         'alphaimf' creates a custom IMF with a single power-law covering imf_bdys.
         'lognormal' creates an IMF of the form Exp[1/(2 1^2) Log[x/charMass]^2
 
         Default value : 'kroupa'
+
+    imf_file : string
+        Only valid when use the 'input' imf_type, it should be put in the direction
+        'imf_list'. The function must name as custom_imf. 
 
     alphaimf : float
         Aplha index of the custom IMF, dN/dM = Constant * M^-alphaimf
@@ -273,7 +277,7 @@ class chem_evol(object):
     sn1a_table : string
         Path pointing toward the stellar yield table for SNe Ia.
 
-        Default value : 'yield_tables/sn1a_i99_W7.txt' (Iwamoto et al. 1999)
+        Default value : 'yield_tables/sn1a_t86.txt' (Tielemann et al. 1986)
 
     nsmerger_table : string
         Path pointing toward the r-process yield tables for neutron star mergers
@@ -437,7 +441,7 @@ class chem_evol(object):
     ##############################################
     ##               Constructor                ##
     ##############################################
-    def __init__(self, imf_type='kroupa', alphaimf=2.35, imf_bdys=[0.1,100],\
+    def __init__(self, imf_type='kroupa', imf_file='', alphaimf=2.35, imf_bdys=[0.1,100],\
              sn1a_rate='power_law', iniZ=0.02, dt=1e6, special_timesteps=60,\
              nsmerger_bdys=[8, 100], tend=13e9, mgal=1.0e11, transitionmass=8, iolevel=0,\
              ini_alpha=True, is_sygma=False,\
@@ -474,6 +478,7 @@ class chem_evol(object):
              t_dtd_poly_split=-1.0, delayed_extra_log=False,\
              delayed_extra_yields_log_int=False,\
              delayed_extra_log_radio=False, delayed_extra_yields_log_int_radio=False,\
+             cal_star = False,\
              pritchet_1a_dtd=[], ism_ini=[], ism_ini_radio=[],\
              nsmerger_dtd_array=[],\
              ytables_in=[], zm_lifetime_grid_nugrid_in=[],\
@@ -563,6 +568,7 @@ class chem_evol(object):
         self.pop3_table = pop3_table
         self.hardsetZ = hardsetZ
         self.imf_type = imf_type
+        self.imf_file = imf_file
         self.alphaimf = alphaimf
         self.sn1a_on = sn1a_on
         self.sn1a_energy=sn1a_energy
@@ -622,6 +628,7 @@ class chem_evol(object):
         self.use_external_integration = use_external_integration
         self.yield_tables_dir = yield_tables_dir
         self.print_off = print_off
+        self.cal_star = cal_star
         self.use_net_yields_stable = use_net_yields_stable
         self.input_yields = input_yields
         self.yield_modifier = yield_modifier
@@ -867,6 +874,10 @@ class chem_evol(object):
         delayed_extra_numbers, imf_mass_ranges, \
         imf_mass_ranges_contribution, imf_mass_ranges_mtot = \
         self._get_storing_arrays(ymgal, len(self.history.isotopes))
+
+        ####Z: Initialisation of the stellar arrays
+        if self.cal_star: 
+            self.massive_star_per_timestep = np.zeros((self.nb_timesteps, self.nb_timesteps+1))
 
         # Initialisation of the composition of the gas reservoir
         if len(self.ism_ini) > 0:
@@ -3320,8 +3331,11 @@ class chem_evol(object):
         lg_tau_upp = np.log10(self.lifetimes_list[i_Z][i_M_low])
         lg_m_low = np.log10(self.M_table[i_M_low+1])
         lg_m_upp = np.log10(self.M_table[i_M_low])
-        a_temp = (lg_m_upp - lg_m_low) / (lg_tau_upp - lg_tau_low)
-        b_temp = lg_m_upp - a_temp * lg_tau_upp
+        if lg_tau_low == lg_tau_upp:
+            return lg_m_low
+        else:
+            a_temp = (lg_m_upp - lg_m_low) / (lg_tau_upp - lg_tau_low)
+            b_temp = lg_m_upp - a_temp * lg_tau_upp
 
         # Return the interpolated mass
         return 10**(a_temp * np.log10(the_tau) + b_temp)
@@ -4092,6 +4106,8 @@ class chem_evol(object):
             # Get the adapted IMF mass bin information
             nb_dm, new_dm_imf, m_lower = \
                 self.__get_mass_bin(dm_imf, t_lower, i_cse)
+            if self.cal_star:
+                self.massive_star_per_timestep[i-1, i_cse] = m_lower
 
             # If the population is not active anymore, stop the loop
             if nb_dm == -1:
@@ -4280,6 +4296,7 @@ class chem_evol(object):
         # If the metallicity is in the PopIII regime ..
         if Z_giy <= self.Z_trans and not is_radio:
 
+            print('Using PopIII now!')
             # Find the lower-mass boundary of the interpolation
             if self.nb_inter_M_points_pop3 < 30:
                 i_M_low = 0
@@ -6962,7 +6979,12 @@ class chem_evol(object):
         if self.imf_type=='input':
 
             # Load the file
-            ci = load_source('custom_imf', os.path.join(nupy_path, 'imf_input.py'))
+            if self.imf_file == None:
+                input_imf = importlib.import_module('NuPyCEE.imf_input')
+            else:
+                input_imf = importlib.import_module('NuPyCEE.imf_list.'+self.imf_file)
+            # ci = load_source('custom_imf', os.path.join(nupy_path, 'imf_input.py'))
+            ci = input_imf.custom_imf
             self.ci = ci
             # Choose the right option
             if inte == 0:
@@ -6970,10 +6992,12 @@ class chem_evol(object):
             if inte == 1:
                 return quad(self.g1_custom, mmin, mmax)[0]
             if inte == 2:
-                return quad(self.g2_custom, mmin, mmax)[0]
+                ##### This may be the reason why I cannot set IMF alpha3 to -2.7!
+                ##### If I have time, I will fix this bug
+                return quad(self.g2_custom, mmin, mmax, limit = 100)[0]
             if inte == -1:
                 self.imfnorm = 1.0 / quad(self.g2_custom, \
-                    self.imf_bdys[0], self.imf_bdys[1])[0]
+                        self.imf_bdys[0], self.imf_bdys[1], limit = 100)[0]
 
         # Chabrier IMF
         elif self.imf_type=='chabrier':
@@ -7193,7 +7217,8 @@ class chem_evol(object):
         '''
 
         # Return the number of stars
-        return self.ci.custom_imf(mass)
+        # return self.ci.custom_imf(mass)
+        return self.ci(mass)
 
 
     ##############################################
@@ -7214,7 +7239,8 @@ class chem_evol(object):
         '''
 
         # Return the total mass of stars
-        return mass * self.ci.custom_imf(mass)
+        # return mass * self.ci.custom_imf(mass)
+        return mass * self.ci(mass)
 
 
     ##############################################
